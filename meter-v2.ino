@@ -2,6 +2,7 @@
 #include <SD.h>
 #include <Wire.h>
 #include <Ethernet.h>
+#include <PubSubClient.h>
 #include "StringList.h"
 #include "StartUp.h"
 
@@ -13,12 +14,51 @@ StringList sl;
 DataEntry de, de1;
 MeasurementData mData;
 bool neof;
+//Server&Arduino's IP and Mac
+byte mac[] = { 0xDE, 0xED, 0xBA, 0xAE, 0xCE, 0xDA };
+IPAddress ip(192, 168, 0, 102);
+IPAddress server(192, 168, 0, 100);   
+//pubsubclient declare
+EthernetClient ethClient;
+PubSubClient mqttClient(ethClient);
+char buff_pub[100];
+
+//connect to the broker.
+void reconnect() {
+  // Loop until we're reconnected
+  while (!mqttClient.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (mqttClient.connect("arduinoClient")) {
+      Serial.println("Connected");
+      // Once connected, publish an announcement...
+      mqttClient.publish("New Comming","Hi i'm new");
+      // ... and resubscribe
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
 
 void setup()
 {
-        uint8_t i;
-        
-	Serial.begin(9600);
+  //mqtt Connection
+  Serial.begin(57600);
+  mqttClient.setServer(server, 1883);
+  mqttClient.setCallback(callback);
+  Ethernet.begin(mac, ip);
+  if (!mqttClient.connected()) {
+            delay(5000);
+            reconnect();
+  }
+  uint8_t i;
+  
+  //setup ethernet shield to network.
+  
 	while(!Serial);
         digitalWrite(53, HIGH);
         //Serial.println("HW_SS, HW_SS_DDR");
@@ -97,6 +137,8 @@ void setup()
         neof = true;
         
         //pinMode(19, INPUT);
+  
+        
         
 }
 
@@ -109,6 +151,7 @@ void loop()
         Serial.print(String(de.timestamp.Second)+", ");
         Serial.println(String(digitalRead(19))+",,"+String(a));
         attachInterrupt(0, testISR, RISING);*/
+        
         if(neof)
         {
         Serial.println("channel, hour, minute, seccond, vrms, irms, realPower, numSamples");
@@ -116,8 +159,14 @@ void loop()
         while(neof)
         {
                 if(neof)
-                {
+                {       
+                        // sending info to broker.
+                        
                         neof = mData.readEntry(de1);
+                        String Irms = String(de1.vrms, 6);
+                        //mqttClient.publish("Current","Test");
+
+                        
                         Serial.print(String(de1.channel)+",");
                         Serial.print(String(de1.timestamp.Hour)+",");
                         Serial.print(String(de1.timestamp.Minute)+",");
@@ -126,6 +175,7 @@ void loop()
                         Serial.print(String(de1.irms, 6)+",");
                         Serial.print(String(de1.realPower, 6)+",");
                         Serial.println(String(daq->getPowerNumSamples()));
+                        
                 }
         }
         
@@ -135,6 +185,9 @@ void loop()
         delete mTime;
         delete daq;
         }
+        
+        mqttClient.loop();
+        
         
         /*char* temp = NULL;
         String r;
@@ -154,3 +207,18 @@ void loop()
         for(rounds=0; rounds < 10; rounds++)
 	        Serial.println("sl["+String(rounds)+"]"+sl[rounds]);*/
 }
+
+
+//method to call the arrival message from broker
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i=0;i<length;i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+}
+
+
+
